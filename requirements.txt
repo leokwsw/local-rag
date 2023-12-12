@@ -11,3 +11,4 @@ tiktoken
 weaviate-client
 ansicolors
 whisper
+python-dotenv==1.0.0
