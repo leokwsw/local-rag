@@ -49,7 +49,7 @@ whisper_model = whisper.load_model("tiny", device="cpu", download_root="model_fi
 use_openai = True
 
 
-def process_local(_output_dir: str, num_processes: int, input_path: str):
+def process_local(output_dir: str, num_processes: int, input_path: str):
     command = [
         "unstructured-ingest",
         "local",
@@ -324,26 +324,26 @@ def tokenizer(msg, model="text-similarity-davinci-001", show=False):
 def question_answer(question: str, vectorstore: Weaviate):
     embedding = compute_embedding(question)
 
-    vector_similar_docs = vectorstore.max_marginal_relevance_search_by_vector(embedding)
-    # vector_similar_docs = vectorstore.similarity_search_by_vector(embedding)
+    # vector_similar_docs = vectorstore.max_marginal_relevance_search_by_vector(embedding)
+    vector_similar_docs = vectorstore.similarity_search_by_vector(embedding)
     # vector_similar_docs = vectorstore.max_marginal_relevance_search(question)
 
     content = [x.page_content for x in vector_similar_docs]
 
     prompt = """
-    Please answer the question using the provided context. If you don't know the answer, just say that you don't know, 
-    and do not attempt to make up an answer.
-    
-    {context}
-    
-    Question: {question}
-    Answer:
-    
-    Please answer in Traditional Chinese.
+    你是學校秘書，據所有的背景信息，用繁體中文回答問題，當中不要超過150字如果。如果我說'''背景信息未完'''，請不要回答，直至我說'''背景信息完成'''才回答。
+
+問題：{question}
+
+背景信息：
+{context}
+原文：
+{original_doc}
+'''背景信息提供完成'''
     """
 
     prompt_template = PromptTemplate.from_template(prompt)
-    prompt = prompt_template.format(context=content, question=question)
+    prompt = prompt_template.format(context=content, question=question, original_doc="")
 
     if use_openai:
         messages = [{'role': 'user', 'content': prompt}]
@@ -388,7 +388,7 @@ vectorstore = Weaviate(
 # endregion
 
 # region ask a question to request answer
-question = "平等機會政策是?"
+question = "資訊科技綜合津貼的對應的規定"
 
 from opencc import OpenCC
 
