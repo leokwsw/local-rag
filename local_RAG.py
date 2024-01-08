@@ -296,10 +296,7 @@ if use_openai:
     )
 else:
     llm = LlamaCpp(
-        # llama2 7B
-        # model_path="model_files/llama-2-7b-chat.Q4_K_S.gguf",
-        # Mistral 7B instruct
-        # model_path="model_files/mistral-7b-instruct-v0.2.Q4_K_S.gguf",
+        model_path="model_files/llama-2-7b-chat.Q4_K_S.gguf",
         n_gpu_layers=n_gpu_layers,
         n_batch=n_batch,
         n_ctx=2048,
