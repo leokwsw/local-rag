@@ -16,7 +16,6 @@ from langchain.vectorstores.weaviate import Weaviate
 from langchain.callbacks.manager import CallbackManager
 from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
 from langchain.prompts import PromptTemplate
-import chatglm_cpp
 import tiktoken
 from colors import color
 from dotenv import load_dotenv
@@ -37,16 +36,15 @@ if openai_key == "":
 output_dir = 'my-docs'
 input_dir = 'files_used'
 weaviate_url = "http://localhost:8080"
-llm_model_name = "THUDM/chatglm2-6b"
-embedding_model_name = 'GanymedeNil/text2vec-base-chinese'
+embedding_model_name = 'all-MiniLM-L6-v2'
 device = 'mps'
 
 root = os.path.dirname(__file__)
-use_verbose = False
+use_verbose = True
 
 whisper_model = whisper.load_model("tiny", device="cpu", download_root="model_files")
 
-use_openai = True
+use_openai = False
 
 
 def process_local(output_dir: str, num_processes: int, input_path: str):
@@ -157,6 +155,16 @@ def get_schema(vectorizer: str = "none"):
                         "dataType": ["text"],
                         "description": "document file path",
                     },
+                    {
+                        "name": "original_filename",
+                        "dataType": ["text"],
+                        "description": "original filename",
+                    },
+                    {
+                        "name": "original_file_content",
+                        "dataType": ["text"],
+                        "description": "original file content",
+                    }
                     # endregion
                 ],
             },
@@ -213,6 +221,9 @@ def get_chunks(elements, chunk_under_n_chars=500, chunk_new_after_n_chars=1500):
     )
 
     for i in range(len(chunks)):
+        original_filename = chunks[i].metadata.filename.replace(".json", "")
+        file_path = os.path.join(root, input_dir, original_filename)
+        original_file_content = open(file_path, "r").read()
         chunks[i] = {
             "last_modified": chunks[i].metadata.last_modified,
             "document_page_number": chunks[i].metadata.page_number,
@@ -225,6 +236,8 @@ def get_chunks(elements, chunk_under_n_chars=500, chunk_new_after_n_chars=1500):
                                                chunks[i].metadata.file_directory + "/" + chunks[i].metadata.filename),
             # "document_file_path": "./" + chunks[i].metadata.file_directory + "/" + chunks[i].metadata.filename,
             "document_file_type": chunks[i].metadata.filetype,
+            "original_filename": original_filename,
+            "original_file_content": original_file_content
             # endregion
         }
 
@@ -274,8 +287,7 @@ print("count documents with class name 'Doc' : ", count_documents(client=client)
 
 callback_manager = CallbackManager([StreamingStdOutCallbackHandler()])
 n_gpu_layers = 1  # Metal set to 1 is enough.
-n_batch = 2048  # Should be between 1 and n_ctx, consider the amount of RAM of your Apple Silicon Chip.
-n_ctx = 4096  # Token context window.
+n_batch = 100  # Should be between 1 and n_ctx, consider the amount of RAM of your Apple Silicon Chip.
 # Make sure the model path is correct for your system!
 
 if use_openai:
@@ -284,15 +296,14 @@ if use_openai:
     )
 else:
     llm = LlamaCpp(
-        model_path="model_files/ggml-model-q4_k.gguf",
+        model_path="model_files/llama-2-7b-chat.Q4_K_S.gguf",
         n_gpu_layers=n_gpu_layers,
         n_batch=n_batch,
-        n_ctx=n_ctx,
+        n_ctx=2048,
         f16_kv=True,  # MUST set to True, otherwise you will run into problem after a couple of calls
         callback_manager=callback_manager,
         verbose=use_verbose,  # Verbose is required to pass to the callback manager
     )
-    llm = chatglm_cpp
 
 
 def tokenizer(msg, model="text-similarity-davinci-001", show=False):
@@ -328,28 +339,45 @@ def question_answer(question: str, vectorstore: Weaviate):
     vector_similar_docs = vectorstore.similarity_search_by_vector(embedding)
     # vector_similar_docs = vectorstore.max_marginal_relevance_search(question)
 
+    original_file_content = [x.metadata["original_file_content"] for x in vector_similar_docs]
+    original_file_content = list(dict.fromkeys(original_file_content))
     content = [x.page_content for x in vector_similar_docs]
 
-    prompt = """
-    你是學校秘書，據所有的背景信息，用繁體中文回答問題，當中不要超過150字如果。如果我說'''背景信息未完'''，請不要回答，直至我說'''背景信息完成'''才回答。
+    # get page content
 
-問題：{question}
+    if use_openai:
+        prompt = """
+        你是學校秘書，據所有的背景信息，用繁體中文回答問題，當中不要超過150字如果。如果我說'''背景信息未完'''，請不要回答，直至我說'''背景信息完成'''才回答。
+    問題:{question}
+    背景信息:
+    {context}
+    
+    原文:
+    {original_doc}
+    
+    '''背景信息提供完成'''
+        """
 
-背景信息：
-{context}
-原文：
-{original_doc}
-'''背景信息提供完成'''
-    """
-
-    prompt_template = PromptTemplate.from_template(prompt)
-    prompt = prompt_template.format(context=content, question=question, original_doc="")
+        prompt_template = PromptTemplate.from_template(prompt)
+    else:
+        prompt_template = PromptTemplate.from_template(
+            """\
+            Given context about the subject, answer the question based on the context provided to the best of your ability.
+            Context: {context}
+            Question:
+            {question}
+            Original file content: {original_doc}
+            Answer:
+            """
+        )
+    prompt = prompt_template.format(context=content, question=question, original_doc=original_file_content)
 
     if use_openai:
         messages = [{'role': 'user', 'content': prompt}]
 
         response = llm.chat.completions.create(
-            model='gpt-3.5-turbo',
+            model='gpt-4-1106-preview',
+            # model='gpt-3.5-turbo',
             messages=messages,
             stream=True
         )
@@ -381,14 +409,16 @@ vectorstore = Weaviate(
         "document_file_name",
         "document_file_directory",
         "document_file_type",
-        "document_file_path"
+        "document_file_path",
+        "original_filename",
+        "original_file_content"
     ]
 )
 
 # endregion
 
 # region ask a question to request answer
-question = "資訊科技綜合津貼的對應的規定"
+question = "24班資訊科技綜合津貼"
 
 from opencc import OpenCC
 

@@ -37,6 +37,9 @@ mkdir model_files #make model files folder to store Llama 2 model files
 CMAKE_ARGS="-DLLAMA_METAL=on" FORCE_CMAKE=1 pip install llama-cpp-python
 #install llama-cpp-python package made for MAC Silicon chips
 huggingface-cli download TheBloke/Llama-2-7b-Chat-GGUF --local-dir model_files --local-dir-use-symlinks False --include='*Q4_K*gguf' #download model
+huggingface-cli download TheBloke/Mistral-7B-Instruct-v0.2-GGUF --local-dir model_files --local-dir-use-symlinks False --include='*Q4_K*gguf'
+huggingface-cli download TheBloke/phi-2-GGUF --local-dir model_files --local-dir-use-symlinks False --include='*Q4_K*gguf'
+
 ```
 
 6. Start Docker Container to Spin up Weaviate VectorDB
